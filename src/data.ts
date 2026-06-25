@@ -639,8 +639,94 @@ export const CHARACTER_OPTIONS = [
   { color: 'Black', name: 'สีดำ', hex: '#18181b', border: '#09090b', shadow: 'rgba(24, 24, 27, 0.6)' }
 ];
 
+export interface HyperDriftSettings {
+  baseRate: number;         // default 1.5
+  floorLimit: number;       // default 1000
+  smallMultiplier: number;  // default 3
+  roundingMode: 'unit' | 'ten' | 'none'; // default 'unit'
+}
+
+export const getHyperDriftSettings = (): HyperDriftSettings => {
+  if (typeof window === 'undefined') {
+    return {
+      baseRate: 1.5,
+      floorLimit: 1000,
+      smallMultiplier: 3,
+      roundingMode: 'unit'
+    };
+  }
+  try {
+    const saved = localStorage.getItem('hyperdrift_settings');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return {
+        baseRate: typeof parsed.baseRate === 'number' ? parsed.baseRate : 1.5,
+        floorLimit: typeof parsed.floorLimit === 'number' ? parsed.floorLimit : 1000,
+        smallMultiplier: typeof parsed.smallMultiplier === 'number' ? parsed.smallMultiplier : 3,
+        roundingMode: ['unit', 'ten', 'none'].includes(parsed.roundingMode) ? parsed.roundingMode : 'unit'
+      };
+    }
+  } catch (e) {
+    // ignore
+  }
+  return {
+    baseRate: 1.5,
+    floorLimit: 1000,
+    smallMultiplier: 3,
+    roundingMode: 'unit'
+  };
+};
+
+export const saveHyperDriftSettings = (settings: HyperDriftSettings) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('hyperdrift_settings', JSON.stringify(settings));
+    // Dispatch custom event to let other components know settings updated
+    window.dispatchEvent(new Event('hyperdrift_settings_changed'));
+  }
+};
+
+export const getHyperDriftRate = (lapCount: number): number => {
+  const settings = getHyperDriftSettings();
+  const targetLap = Math.max(1, lapCount);
+  return parseFloat(Math.pow(settings.baseRate, targetLap - 1).toFixed(4));
+};
+
 export const calculateProgressivePayout = (defaultPayout: number, lapCount: number = 1) => {
-  const ratePercent = lapCount >= 2 ? (8 + lapCount) : 0; // Lap 1 = 0%, Lap 2 = 10%, Lap 3 = 11% ...
-  const rawPayout = defaultPayout * (1 + ratePercent / 100);
-  return Math.floor(rawPayout / 10) * 10; // Floor units digit to 0
+  const settings = getHyperDriftSettings();
+  const targetLap = Math.max(1, lapCount);
+  let previousRoundPayout = defaultPayout;
+
+  for (let r = 1; r <= targetLap; r++) {
+    // 1. Calculate compounding rate (compounding starts after completing 1 lap, so rate is baseRate^(r-1))
+    const rate = Math.pow(settings.baseRate, r - 1);
+
+    // 2. Normal calculation
+    const normalCalc = defaultPayout * rate;
+
+    let roundPayout = 0;
+    if (normalCalc < settings.floorLimit) {
+      const tryMultiplier = (r === 1) ? (defaultPayout * settings.smallMultiplier) : (previousRoundPayout * settings.smallMultiplier);
+      if (tryMultiplier <= settings.floorLimit) {
+        roundPayout = tryMultiplier;
+      } else {
+        // Brake works!
+        const prevValue = (r === 1) ? defaultPayout : previousRoundPayout;
+        roundPayout = prevValue * (r === 1 ? 1.0 : settings.baseRate);
+      }
+    } else {
+      const prevValue = (r === 1) ? defaultPayout : previousRoundPayout;
+      roundPayout = prevValue * (r === 1 ? 1.0 : settings.baseRate);
+    }
+
+    // 3. Rounding Mode
+    if (settings.roundingMode === 'unit') {
+      previousRoundPayout = Math.floor(roundPayout / 10) * 10;
+    } else if (settings.roundingMode === 'ten') {
+      previousRoundPayout = Math.floor(roundPayout / 100) * 100;
+    } else {
+      previousRoundPayout = Math.floor(roundPayout);
+    }
+  }
+
+  return previousRoundPayout;
 };

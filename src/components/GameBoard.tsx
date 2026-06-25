@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { Player, BoardTile, StockDetail, StockOwnership, GameLog, AppNotification } from '../types';
-import { BOARD_TILES, STOCKS_DATA, CHARACTER_OPTIONS, calculateProgressivePayout } from '../data';
+import { BOARD_TILES, STOCKS_DATA, CHARACTER_OPTIONS, calculateProgressivePayout, getHyperDriftRate, getHyperDriftSettings, saveHyperDriftSettings, HyperDriftSettings } from '../data';
 import StockInfoModal from './StockInfoModal';
 import DiceRoller from './DiceRoller';
 import WheelSpinner from './WheelSpinner';
@@ -16,7 +16,7 @@ import {
   Flag, HeartHandshake, Palmtree, Heart, Route, Coins, FileCheck, ShieldCheck, 
   Palette, Trees, Gift, Utensils, Home, Zap, Film, Gem, Plane, Smile, Fuel, 
   ShoppingBag, Hammer, Wrench, CupSoda, Dumbbell, Shirt, Hotel, Printer, TrendingUp, 
-  Globe, Tv, HardHat, Beer, TrendingDown, X
+  Globe, Tv, HardHat, Beer, TrendingDown, X, Filter
 } from 'lucide-react';
 
 // Helper to resolve specific beautiful Lucide icon for each board tile
@@ -228,6 +228,15 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
 
   // Stop turns tracker for current turn
   const [hasRolledThisTurn, setHasRolledThisTurn] = useState(false);
+
+  // Stock Owner Filter & Highlight States
+  const [selectedOwner, setSelectedOwner] = useState<string | null>(null);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [reassigningStockId, setReassigningStockId] = useState<number | null>(null);
+  const [reassigningFromPlayerId, setReassigningFromPlayerId] = useState<string | null>(null);
+
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsForm, setSettingsForm] = useState<HyperDriftSettings>(() => getHyperDriftSettings());
 
   const addNotification = (
     type: AppNotification['type'],
@@ -592,7 +601,9 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
     ownersIds.forEach(ownerId => {
       const ownerObj = players.find(p => p.id === ownerId);
       const ownerLap = ownerObj ? ownerObj.lapCount || 1 : 1;
-      const ownerPercent = ownerLap >= 2 ? (8 + ownerLap) : 0;
+      
+      const rateMultiplier = getHyperDriftRate(ownerLap);
+
       const sharesNum = ownersMap[ownerId];
       const defaultPayout = selectedStock.pricings.find(x => x.shares === sharesNum)?.payout || 0;
       const basePayout = defaultPayout * bonusMultiplier;
@@ -607,7 +618,7 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
         return p;
       });
 
-      payoutsText.push(`${getPlayerName(ownerId)} ได้รับ +${finalPayout.toLocaleString()} บาท (รอบที่ ${ownerLap}: ปันผลเพิ่ม ${ownerPercent}%, ${sharesNum} หุ้น ${bonusMultiplier > 1 ? '🌟โบนัสครบ 4 หุ้น' : ''})`);
+      payoutsText.push(`${getPlayerName(ownerId)} ได้รับ +${finalPayout.toLocaleString()} บาท (รอบที่ ${ownerLap}: เรตคูณไฮเปอร์ดริฟต์ ${rateMultiplier} เท่า, ${sharesNum} หุ้น ${bonusMultiplier > 1 ? '🌟โบนัสครบ 4 หุ้น' : ''})`);
       addNotification('money_in', ownerId, `ปันผลรับ: ${selectedStock.name}`, `ถือหลักสิทธิ์ร่วม ได้รับค่าปันผลจาก ${payer.name} (รอบ ${ownerLap})`, finalPayout);
     });
 
@@ -918,6 +929,40 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
             <span className="text-slate-900 font-extrabold text-base sm:text-lg uppercase tracking-tight">กระดานเศรษฐีใหญ่ ท็อปเกมส์ (โชคนำทาง)</span>
           </div>
           <div className="flex items-center gap-2.5">
+            {/* Stock Owner Map Filter Button */}
+            <button
+              type="button"
+              onClick={() => setShowFilterModal(true)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer shadow-xs active:scale-95 ${
+                selectedOwner !== null
+                  ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 ring-2 ring-amber-400/20'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              }`}
+              id="map-filter-trigger-btn"
+              title="คัดกรองผู้ถือหุ้นและแสดงผลไฮไลท์บนแผนที่แบบเรียลไทม์"
+            >
+              <Filter size={14} className={selectedOwner !== null ? "text-amber-600 animate-pulse" : "text-slate-500"} />
+              {selectedOwner !== null ? (
+                <span className="flex items-center gap-1.5">
+                  <span>แผนที่:</span>
+                  <span className="text-[13px] leading-none">{players.find(p => p.id === selectedOwner)?.emoji}</span>
+                  <span className="font-extrabold">{players.find(p => p.id === selectedOwner)?.name}</span>
+                  <span 
+                    onClick={(e) => {
+                      e.stopPropagation(); // Avoid triggering modal opening
+                      setSelectedOwner(null);
+                    }}
+                    className="ml-1 p-0.5 hover:bg-amber-200/60 rounded text-amber-700 hover:text-red-650 transition-colors flex items-center justify-center shrink-0"
+                    title="ล้างตัวกรอง"
+                  >
+                    <X size={10} strokeWidth={3} />
+                  </span>
+                </span>
+              ) : (
+                <span>ตัวกรองหุ้นแผนที่</span>
+              )}
+            </button>
+
             <button
               onClick={handleUndo}
               disabled={history.length === 0}
@@ -933,6 +978,17 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
               <span className="bg-rose-200/50 text-rose-850 text-[9px] px-1.5 py-0.2 rounded-full font-black font-mono">
                 {history.length}
               </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsForm(getHyperDriftSettings());
+                setShowSettingsModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 transition-all cursor-pointer shadow-xs active:scale-95"
+              id="open-hyperdrift-settings-btn"
+            >
+              <span>⚙️ ตั้งค่าปันผลไฮเปอร์ดริฟต์</span>
             </button>
             {!showResetConfirm ? (
               <button
@@ -969,7 +1025,7 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
         </div>
 
         {/* CSS GRID MONOPOLY BOARD */}
-        <div className="relative grid grid-cols-11 grid-rows-11 border-2 border-slate-300 rounded-lg overflow-hidden aspect-square bg-slate-50 p-1 w-full shadow-md" id="millionaire-digital-board">
+        <div className="relative grid grid-cols-11 grid-rows-11 border-2 border-slate-300 rounded-lg overflow-hidden aspect-square bg-slate-50 p-1 pb-3 w-full shadow-md" id="millionaire-digital-board">
           
           {/* CENTER HOLE CONTENT */}
           <div className="col-start-2 col-end-11 row-start-2 row-end-11 p-4 shrink-0 flex flex-col justify-between overflow-y-auto text-slate-800 bg-slate-100 border border-slate-200 shadow-inner rounded-lg" id="board-center-dashboard">
@@ -1225,6 +1281,23 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
 
             const isCorner = tile.type === 'START' || tile.type.startsWith('PRISON');
 
+            const isStockTile = tile.type === 'STOCK';
+            const isOwnedBySelectedFilter = selectedOwner && tile.stockId 
+              ? (ownership[tile.stockId]?.[selectedOwner] || 0) > 0 
+              : false;
+
+            const isFilterActive = selectedOwner !== null;
+            const isDimmed = isFilterActive && (!isStockTile || !isOwnedBySelectedFilter);
+            
+            const filterOwnerPlayer = selectedOwner ? players.find(p => p.id === selectedOwner) : null;
+            const filterOwnerOpt = filterOwnerPlayer 
+              ? CHARACTER_OPTIONS.find(o => o.color === filterOwnerPlayer.color) || CHARACTER_OPTIONS[0]
+              : null;
+
+            const tilePaddingClass = (tile.type === 'START' || tile.stockId)
+              ? (ownersOfStock.length > 0 ? 'pt-[38px] sm:pt-[44px] px-1 pb-1' : 'pt-[24px] sm:pt-[28px] px-1.5 pb-1.5')
+              : 'p-1.5';
+
             return (
               <div
                 key={tile.index}
@@ -1238,10 +1311,14 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
                     addLog(`[สำรวจช่อง] ${tile.name}: ${tile.effectDescription}`, 'info');
                   }
                 }}
-                className={`border text-[10px] p-1.5 flex flex-col justify-between items-center transition-all select-none cursor-pointer group rounded-md shadow-xs relative ${
-                  tile.type === 'STOCK'
-                    ? 'bg-emerald-50 text-emerald-950 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400'
-                    : 'bg-rose-50 text-rose-950 border-rose-300 hover:bg-rose-100 hover:border-rose-400'
+                className={`border text-[10px] ${tilePaddingClass} flex flex-col justify-between items-center select-none cursor-pointer group rounded-md relative transition-all duration-300 ${
+                  isDimmed 
+                    ? 'opacity-20 grayscale-[40%] scale-95 border-slate-200 shadow-none' 
+                    : isOwnedBySelectedFilter
+                      ? 'ring-4 border-transparent shadow-xl animate-pulse-subtle'
+                      : tile.type === 'STOCK'
+                        ? 'bg-emerald-50 text-emerald-950 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400'
+                        : 'bg-rose-50 text-rose-950 border-rose-300 hover:bg-rose-100 hover:border-rose-400'
                 } ${
                   isCorner 
                     ? 'font-extrabold ring-1 ring-rose-300 shadow-xs' 
@@ -1251,19 +1328,49 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
                   gridColumn: coords.col,
                   gridRow: coords.row,
                   minWidth: 0,
-                  minHeight: 0
+                  minHeight: 0,
+                  ...(isOwnedBySelectedFilter && filterOwnerOpt ? {
+                    borderColor: filterOwnerOpt.hex,
+                    boxShadow: `0 0 25px ${filterOwnerOpt.hex}, inset 0 0 12px ${filterOwnerOpt.hex}`,
+                    borderWidth: '3.5px',
+                    transform: 'scale(1.06)',
+                    zIndex: 30,
+                    backgroundColor: '#fff'
+                  } : {})
                 }}
                 id={`board-tile-${tile.index}`}
                 title={`${tile.name}: ${tile.effectDescription}${stockDetail ? ` (ปันผล ${stockDetail.ratePercent}%)` : ''}`}
               >
-                {/* 1. TOP CENTER: Big Bold Stock Number or symbol (Index removed to avoid clutter) */}
-                {(tile.type === 'START' || tile.stockId) && (
-                  <div className="w-full flex justify-center mt-0.5" id="tile-badge-prefix">
-                    <span className="font-sans text-[10px] font-black tracking-tight text-indigo-950 bg-white/95 px-2 py-0.5 rounded-full border border-slate-300 shadow-xxs shrink-0">
-                      {tile.type === 'START' ? '🏁 START' : `หุ้น ${tile.stockId}`}
-                    </span>
-                  </div>
-                )}
+                {/* 1. TOP CONTAINER: Stock badge prefix and Owner share count badges (Absolutely positioned at the top) */}
+                <div className="absolute top-1 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-0.5 w-full max-w-[95%] pointer-events-none" id="tile-top-container">
+                  {(tile.type === 'START' || tile.stockId) && (
+                    <div className="w-full flex justify-center" id="tile-badge-prefix">
+                      <span className="font-sans text-[10px] font-black tracking-tight text-indigo-950 bg-white/95 px-2 py-0.5 rounded-full border border-slate-300 shadow-xxs shrink-0">
+                        {tile.type === 'START' ? '🏁 START' : `หุ้น ${tile.stockId}`}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 5. TOP CENTER: Custom Owner share count block */}
+                  {ownersOfStock.length > 0 && (
+                    <div className="flex gap-1 justify-center items-center w-full shrink-0" id="tile-owners-badge">
+                      {ownersOfStock.map(oId => {
+                        const p = players.find(x => x.id === oId);
+                        const opt = CHARACTER_OPTIONS.find(o => o.color === p?.color) || CHARACTER_OPTIONS[0];
+                        const shares = ownership[tile.stockId!]?.[oId] || 0;
+                        return (
+                          <div 
+                            key={oId} 
+                            className="flex items-center gap-1 font-mono text-[13px] sm:text-[15px] font-black text-slate-850 bg-white/95 border border-slate-300 py-1 px-2.5 rounded-md shadow-xxs shrink-0" 
+                            title={`${p?.name} ถือหุ้นอยู่ ${shares} หุ้น`}
+                          >
+                            <span className="text-slate-700">{shares} {p?.emoji}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
                 {/* 2. DYNAMIC THEMED LUCIDE ICON */}
                 <div className="my-[4px] flex items-center justify-center shrink-0">
@@ -1280,26 +1387,6 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
                 </div>
 
                 {/* (4. Dividend overlay removed as requested) */}
-
-                {/* 5. BOTTOM CENTER: Custom Owner share count block */}
-                {ownersOfStock.length > 0 && (
-                  <div className="flex gap-1 justify-center items-center w-full my-[1.5px] shrink-0" id="tile-owners-badge">
-                    {ownersOfStock.map(oId => {
-                      const p = players.find(x => x.id === oId);
-                      const opt = CHARACTER_OPTIONS.find(o => o.color === p?.color) || CHARACTER_OPTIONS[0];
-                      const shares = ownership[tile.stockId!]?.[oId] || 0;
-                      return (
-                        <div 
-                          key={oId} 
-                          className="flex items-center gap-1 font-mono text-[9.5px] font-black text-slate-850 bg-white/95 border border-slate-300 py-0.5 px-1.5 rounded-md shadow-xxs shrink-0" 
-                          title={`${p?.name} ถือหุ้นอยู่ ${shares} หุ้น`}
-                        >
-                          <span className="text-slate-700">{shares} {p?.emoji}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
 
                 {/* 6. CENTER FLOATING PAWNS OVERLAY (FLUID & ALWAYS CENTERED ON TOP OF ICON/THEME) */}
                 {playersOnTile.length > 0 && (
@@ -1371,6 +1458,318 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
           onReassignStockOwner={handleReassignStockOwner}
         />
       )}
+
+      {/* INTERACTIVE STOCK FILTER POPUP MODAL */}
+      <AnimatePresence>
+        {showFilterModal && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 25 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 25 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className="bg-white rounded-2xl shadow-2xl border border-slate-250 w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]"
+              id="map-filter-popup-modal"
+            >
+              {/* Modal Header */}
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-5 text-white flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="p-2 bg-indigo-500/20 rounded-xl flex items-center justify-center border border-indigo-500/30">
+                    <Filter size={18} className="text-indigo-300 animate-pulse" />
+                  </span>
+                  <div>
+                    <h3 className="font-extrabold text-base tracking-tight font-sans">
+                      ตัวคัดกรองหุ้นแผนที่และควบคุมสิทธิ์ด่วน
+                    </h3>
+                    <p className="text-[11px] text-slate-300 font-medium font-sans">
+                      เลือกผู้เล่นเพื่อไฮไลท์บริษัทบนกระดาน และปรับแต่งสิทธิ์ปันผล / โอนหุ้น
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFilterModal(false);
+                    setReassigningStockId(null);
+                    setReassigningFromPlayerId(null);
+                  }}
+                  className="p-1.5 bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white rounded-lg transition-all"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-6 flex flex-col gap-5 overflow-y-auto flex-1 bg-slate-50">
+                {/* Filter Selector Bar */}
+                <div className="flex flex-col gap-2">
+                  <span className="block text-[10.5px] text-slate-400 font-extrabold uppercase tracking-wider">
+                    👤 เลือกผู้ถือหุ้นเพื่อคัดกรองและแสดงผลบนแผนที่
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {/* [ All Stocks Option ] */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOwner(null);
+                        setReassigningStockId(null);
+                        setReassigningFromPlayerId(null);
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-xxs ${
+                        selectedOwner === null
+                          ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/15'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span className="text-[11px]">🟢</span> ทั้งหมด (แสดงปกติ)
+                    </button>
+
+                    {/* Players List */}
+                    {players
+                      .filter(p => !p.isBankrupt)
+                      .map(p => {
+                        const opt = CHARACTER_OPTIONS.find(o => o.color === p.color) || CHARACTER_OPTIONS[0];
+                        const isSelected = selectedOwner === p.id;
+                        const ownedCount = Object.keys(ownership).filter(stId => (ownership[parseInt(stId)]?.[p.id] || 0) > 0).length;
+
+                        return (
+                          <button
+                            key={`modal-filter-${p.id}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedOwner(isSelected ? null : p.id);
+                              setReassigningStockId(null);
+                              setReassigningFromPlayerId(null);
+                            }}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-xxs ${
+                              isSelected
+                                ? 'text-white font-black'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                            }`}
+                            style={{
+                              backgroundColor: isSelected ? opt.hex : undefined,
+                              borderColor: isSelected ? opt.hex : undefined,
+                            }}
+                          >
+                            <span className="text-[14px] leading-none shrink-0">{p.emoji}</span>
+                            <span>{p.name}</span>
+                            <span className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-sans font-extrabold ${
+                              isSelected ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              {ownedCount} หุ้น
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Filter Visual State Alert */}
+                {selectedOwner && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5 shadow-3xs">
+                    <Sparkles className="text-amber-600 shrink-0 mt-0.5 animate-pulse" size={16} />
+                    <div className="text-xs text-amber-900 leading-normal">
+                      ระบบกำลัง <strong className="font-extrabold text-amber-950 font-sans">"ไฮไลท์กล่องบริษัท"</strong> ของ 
+                      <span className="font-extrabold"> {players.find(p => p.id === selectedOwner)?.emoji} {players.find(p => p.id === selectedOwner)?.name}</span> 
+                      บนแผนที่กระดานด้วยวงแสงออร่าของสีหลัก และทำการหรี่แสงช่องอื่นๆ ลงชั่วคราว
+                    </div>
+                  </div>
+                )}
+
+                {/* Stocks list with responsive grid layout inside modal */}
+                <div className="flex flex-col gap-3">
+                  <span className="block text-[10.5px] text-slate-400 font-extrabold uppercase tracking-wider">
+                    📋 รายการหลักทรัพย์ที่เข้าข่ายเงื่อนไข ({
+                      (selectedOwner
+                        ? STOCKS_DATA.filter(stock => (ownership[stock.id]?.[selectedOwner] || 0) > 0)
+                        : STOCKS_DATA
+                      ).length
+                    } บริษัท)
+                  </span>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[42vh] overflow-y-auto pr-1" id="modal-stock-grid-container">
+                    {(selectedOwner
+                      ? STOCKS_DATA.filter(stock => (ownership[stock.id]?.[selectedOwner] || 0) > 0)
+                      : STOCKS_DATA
+                    ).length === 0 ? (
+                      <div className="col-span-full text-center py-10 text-slate-500 text-xs bg-white border border-slate-200 border-dashed rounded-xl">
+                        ไม่มีหุ้นในครอบครองของตัวละครนี้ในระบบขณะนี้
+                      </div>
+                    ) : (
+                      (selectedOwner
+                        ? STOCKS_DATA.filter(stock => (ownership[stock.id]?.[selectedOwner] || 0) > 0)
+                        : STOCKS_DATA
+                      ).map(stock => {
+                        const stockOwnersMap = ownership[stock.id] || {};
+                        const ownersOfThisStock = Object.keys(stockOwnersMap).filter(pId => stockOwnersMap[pId] > 0);
+
+                        return (
+                          <div 
+                            key={`modal-stock-card-${stock.id}`}
+                            onClick={() => {
+                              // Close filter and open detailed info modal
+                              setShowFilterModal(false);
+                              setSelectedStock(stock);
+                            }}
+                            className="bg-white border border-slate-200 hover:border-indigo-400 rounded-xl p-4 shadow-3xs hover:shadow-2xs transition-all flex flex-col gap-3 cursor-pointer group hover:-translate-y-0.5 duration-150"
+                          >
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[9px] font-black font-mono bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-150 shrink-0">
+                                  หุ้น {stock.id}
+                                </span>
+                                <h4 className="text-xs font-black text-slate-800 leading-tight group-hover:text-indigo-700 transition-colors">
+                                  {stock.name}
+                                </h4>
+                              </div>
+                              <span className="text-[9px] text-slate-400 font-bold bg-slate-50 border border-slate-100 px-1.5 py-0.2 rounded-full">
+                                ปันผล {stock.ratePercent}%
+                              </span>
+                            </div>
+
+                            {/* Owners & Dividends Inside Card */}
+                            <div className="flex flex-col gap-2">
+                              {ownersOfThisStock.length === 0 ? (
+                                <span className="text-[10px] text-slate-400 italic font-sans block">
+                                  🚫 ยังไม่มีเจ้าของครอบครอง
+                                </span>
+                              ) : (
+                                ownersOfThisStock.map(ownerId => {
+                                  const ownerObj = players.find(p => p.id === ownerId);
+                                  if (!ownerObj) return null;
+
+                                  const opt = CHARACTER_OPTIONS.find(o => o.color === ownerObj.color) || CHARACTER_OPTIONS[0];
+                                  const sharesCount = stockOwnersMap[ownerId] || 0;
+                                  const ownerLap = ownerObj.lapCount || 1;
+
+                                  // Dividend calculations
+                                  const sharePriceObj = stock.pricings.find(x => x.shares === sharesCount);
+                                  const ownsAllShares = ownersOfThisStock.length === 1 && sharesCount === 4;
+                                  const bonusMul = ownsAllShares ? 2 : 1;
+                                  const defaultPayout = sharePriceObj ? sharePriceObj.payout * bonusMul : 0;
+                                  const normalDividend = calculateProgressivePayout(defaultPayout, ownerLap);
+
+                                  const isReassigningThis = reassigningStockId === stock.id && reassigningFromPlayerId === ownerId;
+
+                                  return (
+                                    <div 
+                                      key={`modal-card-owner-${ownerId}`} 
+                                      onClick={(e) => e.stopPropagation()} // Stop modal clicking
+                                      className="bg-slate-50 border border-slate-150 rounded-lg p-2.5 flex flex-col gap-2"
+                                    >
+                                      <div className="flex items-center justify-between flex-wrap gap-1">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                          <span 
+                                            className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white shrink-0"
+                                            style={{ backgroundColor: opt.hex }}
+                                          >
+                                            {ownerObj.emoji}
+                                          </span>
+                                          <span className="text-[11px] font-bold text-slate-850 truncate">
+                                            {ownerObj.name} <span className="text-[9.5px] text-slate-400 font-normal">({sharesCount} หุ้น, รอบ {ownerLap})</span>
+                                          </span>
+                                        </div>
+                                        
+                                        {!isReassigningThis && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setReassigningStockId(stock.id);
+                                              setReassigningFromPlayerId(ownerId);
+                                            }}
+                                            className="text-[9px] bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-150 hover:border-indigo-600 px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer flex items-center gap-0.5 active:scale-95 shrink-0 animate-fade-in"
+                                          >
+                                            🔁 ย้ายผู้ถือ
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      {/* Dividends Grid inside card */}
+                                      <div className="grid grid-cols-2 gap-1.5 border-t border-slate-200/50 pt-2 text-center">
+                                        <div className="bg-white border border-slate-150 p-1 rounded flex flex-col">
+                                          <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">ปันผลฐาน</span>
+                                          <span className="text-[11px] font-black text-slate-600 font-mono">
+                                            {defaultPayout.toLocaleString()} ฿
+                                          </span>
+                                        </div>
+                                        <div className="bg-amber-50/40 border border-amber-200/50 p-1 rounded flex flex-col">
+                                          <span className="text-[8px] text-amber-700 font-bold uppercase tracking-wider font-sans">ปันผลไฮเปอร์ดริฟต์</span>
+                                          <span className="text-[11px] font-black text-amber-850 font-mono">
+                                            {normalDividend.toLocaleString()} ฿
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* Reassign owner dropdown panel */}
+                                      {isReassigningThis && (
+                                        <div className="mt-2 p-2 bg-indigo-50 border border-indigo-150 rounded-lg flex flex-col gap-1.5 animate-fade-in text-left">
+                                          <span className="text-[9px] font-bold text-indigo-950 block">
+                                            👑 เลือกโอนสิทธิ์หุ้นทั้งหมดให้กับ:
+                                          </span>
+                                          <div className="grid grid-cols-2 gap-1">
+                                            {players
+                                              .filter(p => !p.isBankrupt && p.id !== ownerId)
+                                              .map(p => (
+                                                <button
+                                                  key={`modal-target-${p.id}`}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    handleReassignStockOwner(stock.id, ownerId, p.id);
+                                                    setReassigningStockId(null);
+                                                    setReassigningFromPlayerId(null);
+                                                  }}
+                                                  className="py-1 px-1 bg-white hover:bg-indigo-600 text-slate-750 hover:text-white border border-slate-200 hover:border-indigo-600 rounded text-[9.5px] font-bold cursor-pointer transition-all truncate text-center"
+                                                >
+                                                  {p.emoji} {p.name}
+                                                </button>
+                                              ))}
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setReassigningStockId(null);
+                                              setReassigningFromPlayerId(null);
+                                            }}
+                                            className="text-[8.5px] text-slate-500 hover:text-rose-600 text-center underline font-semibold mt-0.5"
+                                          >
+                                            ยกเลิก
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer Controls */}
+              <div className="bg-slate-100 p-4 border-t border-slate-200 flex justify-between items-center shrink-0">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-sans">
+                  * คลิกที่กล่องบริษัทเพื่อเปิดหน้ารายละเอียดเต็มรูปแบบ
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFilterModal(false);
+                    setReassigningStockId(null);
+                    setReassigningFromPlayerId(null);
+                  }}
+                  className="px-5 py-2 text-xs font-black text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-md transition duration-150 cursor-pointer"
+                >
+                  เรียบร้อย
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* FULLSCREEN WHEEL OF FORTUNE POPUP MODAL */}
       <AnimatePresence>
@@ -1555,6 +1954,147 @@ export default function GameBoard({ initialPlayers, onResetGame }: GameBoardProp
                     </div>
                   );
                 })()}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showSettingsModal && (
+          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto animate-fade-in" id="hyperdrift-settings-modal-overlay">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl border border-slate-150 w-full max-w-md overflow-hidden text-slate-800"
+              id="hyperdrift-settings-modal-card"
+            >
+              <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-5 py-4 text-white flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">⚙️</span>
+                  <div>
+                    <h3 className="font-extrabold text-sm tracking-tight font-sans">ตั้งค่าปันผลระบบไฮเปอร์ดริฟต์</h3>
+                    <p className="text-[10px] text-amber-100 font-medium">Hyper-Drift Dividend Configuration</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(false)}
+                  className="p-1.5 hover:bg-white/20 rounded-lg text-white transition-colors cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="bg-amber-50 border border-amber-200/50 p-3 rounded-xl text-amber-900 text-xs flex gap-2.5">
+                  <span className="text-base shrink-0">📈</span>
+                  <div className="leading-relaxed">
+                    ปรับแต่งเรตการคำนวณ ความแรง และการทอยของระบบปันผล เพื่อให้เหมาะกับการตั้งราคาในสไตล์การเล่นของคุณเอง
+                  </div>
+                </div>
+
+                <div className="space-y-3.5">
+                  {/* 1. Base Rate */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex justify-between">
+                      <span>1. ตัวคูณเริ่มต้นรอบแรก (Base Rate)</span>
+                      <span className="text-amber-700 font-mono font-black">{settingsForm.baseRate}x</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="5"
+                      step="0.1"
+                      value={settingsForm.baseRate}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, baseRate: parseFloat(e.target.value) })}
+                      className="w-full accent-amber-600 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-400 font-bold px-0.5 mt-0.5">
+                      <span>0.5x (ต่ำมาก)</span>
+                      <span>1.5x (ปกติ)</span>
+                      <span>5.0x (บ้าคลั่ง)</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* 3. Floor Limit */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        2. เกณฑ์ขั้นต่ำดักเบรก
+                      </label>
+                      <input
+                        type="number"
+                        min="100"
+                        max="10000"
+                        step="100"
+                        value={settingsForm.floorLimit}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, floorLimit: parseInt(e.target.value) || 1000 })}
+                        className="w-full text-xs font-bold font-mono px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+
+                    {/* 4. Small Multiplier */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        3. ตัวคูณหุ้นเล็ก (ทบ)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        step="0.5"
+                        value={settingsForm.smallMultiplier}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, smallMultiplier: parseFloat(e.target.value) || 3 })}
+                        className="w-full text-xs font-bold font-mono px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 5. Rounding Mode */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      4. โหมดการปัดเศษปันผลสุทธิ
+                    </label>
+                    <select
+                      value={settingsForm.roundingMode}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, roundingMode: e.target.value as any })}
+                      className="w-full text-xs font-bold px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      <option value="unit">ปัดเศษหลักหน่วยลงเป็น 0 (เช่น 1,234 ฿ ➡️ 1,230 ฿)</option>
+                      <option value="ten">ปัดเศษหลักสิบลงเป็น 0 (เช่น 1,234 ฿ ➡️ 1,200 ฿)</option>
+                      <option value="none">ไม่ปัดเศษเลย (เฉพาะจำนวนเต็ม)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border-t border-slate-150 p-4 flex gap-2.5 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const defaultSettings = {
+                      baseRate: 1.5,
+                      floorLimit: 1000,
+                      smallMultiplier: 3,
+                      roundingMode: 'unit' as const
+                    };
+                    setSettingsForm(defaultSettings);
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 rounded-xl transition duration-150 cursor-pointer"
+                >
+                  คืนค่าเริ่มต้นของระบบ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    saveHyperDriftSettings(settingsForm);
+                    addLog('⚙️ [ระบบ] บันทึกการตั้งค่าปันผลไฮเปอร์ดริฟต์ใหม่เรียบร้อยแล้ว!', 'success');
+                    setShowSettingsModal(false);
+                  }}
+                  className="px-4 py-2 text-xs font-extrabold text-white bg-amber-600 hover:bg-amber-500 rounded-xl shadow-md shadow-amber-600/10 hover:shadow-amber-600/20 active:scale-95 transition duration-150 flex items-center gap-1 cursor-pointer"
+                >
+                  💾 บันทึกการตั้งค่า
+                </button>
               </div>
             </motion.div>
           </div>

@@ -4,7 +4,7 @@
  */
 
 import { Player, StockDetail, StockOwnership } from '../types';
-import { CHARACTER_OPTIONS, BOARD_TILES, calculateProgressivePayout, STOCKS_DATA } from '../data';
+import { CHARACTER_OPTIONS, BOARD_TILES, calculateProgressivePayout, STOCKS_DATA, getHyperDriftRate } from '../data';
 import { Landmark, TrendingUp, HandCoins, UserPlus, X, HeartHandshake, AlertCircle } from 'lucide-react';
 import { useState } from 'react';
 
@@ -378,7 +378,7 @@ export default function StockInfoModal({
                           <div className="text-right">
                             <span className="block text-sm font-extrabold text-indigo-600">รับปันผล {payoutShare.toLocaleString()} บ.</span>
                             <span className="block text-[9.5px] text-indigo-500 font-bold mb-1">
-                              รอบที่ {ownerLap} {ownerLap >= 2 ? `(ปันผลโหด +${8 + ownerLap}%)` : '(ปันผลปกติ)'}
+                              รอบที่ {ownerLap} (ดริฟต์คูณ {getHyperDriftRate(ownerLap)} เท่า)
                             </span>
                             <button
                               onClick={() => onSellShares(pId, 1)}

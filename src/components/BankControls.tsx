@@ -5,8 +5,8 @@
 
 import React, { useState } from 'react';
 import { Player, StockDetail, StockOwnership } from '../types';
-import { CHARACTER_OPTIONS } from '../data';
-import { Landmark, ArrowLeftRight, HeartCrack, ChevronRight, DollarSign } from 'lucide-react';
+import { CHARACTER_OPTIONS, calculateProgressivePayout } from '../data';
+import { Landmark, ArrowLeftRight, HeartCrack, ChevronRight, DollarSign, Filter, Coins, Users, Check } from 'lucide-react';
 
 interface BankControlsProps {
   players: Player[];
@@ -372,7 +372,6 @@ export default function BankControls({
           </button>
         </form>
       </div>
-
 
     </div>
   );
