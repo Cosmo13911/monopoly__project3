@@ -1,0 +1,6 @@
+{
+  "name": "Millionaire Board Game Companion",
+  "description": "เครื่องมือช่วยบันทึกข้อมูลและบอร์ดเกมเศรษฐีใหญ่ โชค 2 ชั้น พร้อมระบบวงล้อสุ่ม และระบบบริหารหุ้นตามกติกา",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
